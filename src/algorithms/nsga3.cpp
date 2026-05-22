@@ -1,12 +1,20 @@
 /*
  *  Implements the NSGA-III multi-objective evolutionary algorithm
- *  as described in http://dx.doi.org/10.1109/TEVC.2013.2281535
+ *  as described in:
+ *
+ *  Deb, K. and Jain, H., "An Evolutionary Many-Objective Optimization Algorithm
+ *  Using Reference-Point-Based Nondominated Sorting Approach, Part I: Solving
+ *  Problems With Box Constraints," IEEE Trans. Evol. Comput., vol. 18, no. 4,
+ *  pp. 577-601, Aug. 2014, doi: 10.1109/TEVC.2013.2281535
+ *
+ *  Section references in the code below refer to this paper.
  *
  *  Paul Slavin <paul.slavin@manchester.ac.uk>
  */
 #include <algorithm>
 #include <iostream>
 #include <optional>
+#include <sstream>
 #include <string>
 #include <tuple>
 #include <vector>
@@ -26,6 +34,7 @@
 
 namespace pagmo{
 
+// Section V, Table I: default parameter values from Deb & Jain, 2014
 nsga3::nsga3(unsigned gen, double cr, double eta_c, double mut, double eta_mut,
              size_t divisions, unsigned seed, bool use_memory)
         : m_gen(gen), m_cr(cr), m_eta_c(eta_c), m_mut(mut), m_eta_mut(eta_mut),
@@ -61,6 +70,22 @@ nsga3::nsga3(unsigned gen, double cr, double eta_c, double mut, double eta_mut,
 }
 
 
+std::string nsga3::get_extra_info() const{
+    std::ostringstream ss;
+    stream(ss, "\tGenerations: ", m_gen);
+    stream(ss, "\n\tCrossover probability: ", m_cr);
+    stream(ss, "\n\tDistribution index for crossover: ", m_eta_c);
+    stream(ss, "\n\tMutation probability: ", m_mut);
+    stream(ss, "\n\tDistribution index for mutation: ", m_eta_mut);
+    stream(ss, "\n\tReference point divisions: ", m_divisions);
+    stream(ss, "\n\tSeed: ", m_seed);
+    stream(ss, "\n\tVerbosity: ", m_verbosity);
+    return ss.str();
+}
+
+
+// Section V-A, Algorithm 1 Step 3: generate reference points on the unit simplex
+// using the Das & Dennis (1998) systematic approach.
 std::vector<ReferencePoint> nsga3::generate_uniform_reference_points(size_t nobjs, size_t divisions) const{
     ReferencePoint rp(nobjs);
     if(!m_refpoints.empty()){
@@ -71,6 +96,9 @@ std::vector<ReferencePoint> nsga3::generate_uniform_reference_points(size_t nobj
 }
 
 
+// Algorithm 1, Step 4: translate objectives by subtracting the ideal point.
+// When cross-generation memory is enabled, the ideal point is computed over the
+// union of the current population and the stored ideal from prior generations.
 std::vector<std::vector<double>> nsga3::translate_objectives(population pop) const{
     size_t NP = pop.size();
     size_t nobj = pop.get_problem().get_nobj();
@@ -99,7 +127,10 @@ std::vector<std::vector<double>> nsga3::translate_objectives(population pop) con
     return translated_objs;
 }
 
-// fronts arg is NDS return type
+// Algorithm 1, Step 5: find extreme points for adaptive normalization.
+// For each objective i, minimises the Achievement Scalarization Function (ASF)
+// with weight vector w_i = 1.0 on objective i and w_j = 1e-6 elsewhere,
+// restricted to the first non-dominated front (and optionally prior memories).
 std::vector<std::vector<double>> nsga3::find_extreme_points(population pop,
                                                std::vector<std::vector<pop_size_t>> &fronts,
                                                std::vector<std::vector<double>> &translated_objs) const{
@@ -147,14 +178,13 @@ std::vector<std::vector<double>> nsga3::find_extreme_points(population pop,
     return points;
 }
 
+// Algorithm 1, Step 6: compute hyperplane intercepts from extreme points.
+// Assembles the linear system A x = b where A is the matrix of extreme points
+// and b is a vector of ones. Solves via Gaussian elimination; the intercepts
+// are the reciprocals of the solution. Falls back to the nadir point when the
+// extreme points are degenerate (duplicates causing a singular matrix) or any
+// intercept is negative.
 std::vector<double> nsga3::find_intercepts(population pop, std::vector<std::vector<double>> &ext_points) const{
-    /*  1. Check duplicate extreme points
-     *  2. A = translated objectives of extreme points;  b = [1,1,...] to n_objs
-     *  3. Solve Ax = b via Gaussian Elimination
-     *  4. Return reciprocals as intercepts
-     *  NB Duplicate ext_points (singular matrix) and
-     *  negative intercepts fall back to nadir values.
-     */
 
     size_t n_obj = pop.get_problem().get_nobj();
     std::vector<double> b(n_obj, 1.0);
@@ -214,14 +244,14 @@ std::vector<double> nsga3::find_intercepts(population pop, std::vector<std::vect
     return intercepts;
 }
 
+// Algorithm 1, Step 7, Equation 4: normalise objectives using intercepts.
+// Each translated objective f_i' is divided by the corresponding intercept a_i,
+// yielding normalised values f_i^n = f_i' / a_i. Intercepts are clamped to
+// at least epsilon to avoid division by zero.
 std::vector<std::vector<double>> nsga3::normalize_objectives(std::vector<std::vector<double>> &translated_objs,
-                                                      std::vector<double> &intercepts) const{
-    /*  Algorithm 2, step 7 and Equation 4
-     *  Note that Objectives and therefore intercepts
-     *  are already translated by ideal point.
-     */
+                                                       std::vector<double> &intercepts) const{
 
-    size_t nobj = translated_objs[1].size();
+    size_t nobj = translated_objs[0].size();
     std::vector<std::vector<double>> norm_objs(translated_objs.size(), std::vector<double>(nobj));
 
     for(size_t i=0; i<translated_objs.size(); i++){
@@ -234,6 +264,12 @@ std::vector<std::vector<double>> nsga3::normalize_objectives(std::vector<std::ve
     return norm_objs;
 }
 
+// Algorithm 1 (main NSGA-III procedure): evolve the population for m_gen generations.
+// Each generation:
+//   1. Create offspring population Q_t via SBX crossover + polynomial mutation (Step 9)
+//   2. Form R_t = P_t U Q_t (Step 2)
+//   3. Sort R_t by non-domination (Step 3)
+//   4. Select N individuals from R_t via reference-point-based niching (Steps 4-14)
 population nsga3::evolve(population pop) const{
     const auto &prob = pop.get_problem();
     const auto bounds = prob.get_bounds();
@@ -302,7 +338,7 @@ population nsga3::evolve(population pop) const{
 
         if(m_verbosity > 0u){
             std::vector<double> p_ideal = ideal(pop.get_f());
-            if (m_gen % m_verbosity == 1u || m_verbosity == 1u) {
+            if (gen % m_verbosity == 1u) {
                 // We compute the ideal point
                 // Every 50 lines print the column names
                 if (count % 50u == 1u) {
@@ -316,7 +352,7 @@ population nsga3::evolve(population pop) const{
                     }
                     print('\n');
                 }
-                print(std::setw(7), m_gen, std::setw(15), prob.get_fevals() - fevals0);
+                print(std::setw(7), gen, std::setw(15), prob.get_fevals() - fevals0);
                 for (decltype(p_ideal.size()) i = 0u; i < p_ideal.size(); ++i) {
                     if (i >= 5u) {
                         break;
@@ -326,7 +362,7 @@ population nsga3::evolve(population pop) const{
                 print('\n');
                 ++count;
             }
-            m_log.emplace_back(m_gen, prob.get_fevals() - fevals0, p_ideal);
+            m_log.emplace_back(gen, prob.get_fevals() - fevals0, p_ideal);
         }
 
         // Offspring generation
@@ -366,13 +402,11 @@ population nsga3::evolve(population pop) const{
     return pop;
 }
 
-/*  Selects members of a population for survival into the next generation
- *  arguments:
- *    population R: The combined parent and offspring populations
- *                  of size 2*N_pop
- *    size_t N_pop: The target population size to return
- *
- */
+// Algorithm 1, Steps 4-14: reference-point-based selection.
+// Accepts all members from the first l-1 non-dominated fronts (Step 4).
+// The last front's members are selected via the niche-preservation operator
+// (Steps 10-14), which adaptively normalises objectives, associates
+// individuals with reference points, and applies the niching procedure.
 std::vector<size_t> nsga3::selection(population &R, size_t N_pop) const{
 
     std::vector<size_t> next;
@@ -426,7 +460,8 @@ std::vector<size_t> nsga3::selection(population &R, size_t N_pop) const{
 // Object serialization
 template <typename Archive>
 void nsga3::serialize(Archive &ar, unsigned int) {
-    detail::archive(ar, m_gen, m_cr, m_eta_c, m_mut, m_eta_mut, m_seed, m_verbosity, m_log);
+    detail::archive(ar, m_gen, m_cr, m_eta_c, m_mut, m_eta_mut, m_divisions, m_seed, m_use_memory,
+                    m_memory.v_extreme, m_memory.v_ideal, m_memory.v_nadir, m_verbosity, m_log);
 }
 
 }  // namespace pagmo

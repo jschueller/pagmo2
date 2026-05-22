@@ -46,3 +46,15 @@ more in general, to multi-objective optimization tasks.
 --------------------------------------------------------------------------
 
 .. doxygenfunction:: pagmo::decompose_objectives
+
+--------------------------------------------------------------------------
+
+.. doxygenfunction:: pagmo::gaussian_elimination
+
+--------------------------------------------------------------------------
+
+.. doxygenfunction:: pagmo::achievement
+
+--------------------------------------------------------------------------
+
+.. doxygenfunction:: pagmo::perpendicular_distance

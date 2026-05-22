@@ -43,6 +43,7 @@ Implemented algorithms
   algorithms/cstrs_self_adaptive
   algorithms/nlopt
   algorithms/nsga2
+  algorithms/nsga3
   algorithms/nspso
   algorithms/pso
   algorithms/pso_gen
@@ -136,6 +137,7 @@ Utilities
   :maxdepth: 1
 
   utils/multi_objective
+  utils/reference_point
   utils/constrained
   utils/discrepancy
   utils/hypervolume

@@ -216,13 +216,43 @@ inline std::vector<vector_double> decomposition_weights(vector_double::size_type
 PAGMO_DLL_PUBLIC vector_double decompose_objectives(const vector_double &, const vector_double &, const vector_double &,
                                                     const std::string &);
 
-// Gaussian Elimination
+/// Gaussian Elimination
+/**
+ * Solves the linear system Ax = b by performing Gaussian elimination
+ * on the augmented matrix [A|b]. Used by NSGA-III to compute hyperplane
+ * intercepts from extreme points (Deb & Jain, 2014, Algorithm 1, Step 6).
+ *
+ * @param A Coefficient matrix (n x n).
+ * @param b Right-hand side vector (size n).
+ * @return Solution vector x.
+ *
+ * @throws std::invalid_argument if A[0][0] is zero (singular pivot).
+ */
 PAGMO_DLL_PUBLIC vector_double gaussian_elimination(std::vector<std::vector<double>>, const vector_double &);
 
-// Achievement Scalarization Function
+/// Achievement Scalarization Function (ASF)
+/**
+ * Computes the ASF value \f$ \max_i (f_i / w_i) \f$ with weights clamped
+ * to a minimum of 1e-5 to avoid division by zero. Used by NSGA-III to
+ * identify extreme points (Deb & Jain, 2014, Section IV-B).
+ *
+ * @param objs Objective vector.
+ * @param weights Weight vector.
+ * @return The maximum weighted ratio.
+ */
 PAGMO_DLL_PUBLIC double achievement(const vector_double &, const vector_double &);
 
-// Perpendicular distance to reference point vectors
+/// Perpendicular distance to a reference direction
+/**
+ * Computes the perpendicular (Euclidean) distance from an objective point
+ * to the line defined by a reference direction vector. Used by NSGA-III
+ * to associate individuals with their nearest reference point
+ * (Deb & Jain, 2014, Section IV-C).
+ *
+ * @param ref_point Reference direction vector (coefficients on the unit simplex).
+ * @param obj_point Normalised objective vector.
+ * @return The perpendicular distance.
+ */
 PAGMO_DLL_PUBLIC double perpendicular_distance(const std::vector<double> &, const std::vector<double> &);
 
 /* Choose single random element from vector container */
